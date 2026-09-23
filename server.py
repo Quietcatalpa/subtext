@@ -154,6 +154,18 @@ def rank(state, candidates, relation, style):
     return {"ranked": items, "ms": round(ms, 1), "method": method}
 
 
+def add_style_sample(context, reply):
+    """把我自己写并采纳的回复加进风格语料。重复的不再加一次。"""
+    STYLE.reload()
+    if any(s["reply"] == reply and [c["text"] for c in s.get("context", [])] == [c["text"] for c in context]
+           for s in STYLE.samples):
+        return False
+    with (HERE / "my_style.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"context": context, "reply": reply, "src": "adopted"}, ensure_ascii=False) + "\n")
+    STYLE.reload()
+    return True
+
+
 def generate(turns, relation, style, analysis, like_me=False):
     if not LLM_API_KEY:
         raise RuntimeError("没有配置大模型 API key，请用「自己写候选」模式，或按 README 配置 DEEPSEEK_API_KEY")
@@ -328,15 +340,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "not found"})
 
             if self.path == "/api/adopt":
+                chosen, mode = req.get("chosen", "").strip(), req.get("mode")
+                ctx = [{"who": w, "text": t} for w, t in turns]
                 # 记下我最终采纳了哪条：以后微调排序模型用得上
                 with ADOPTED.open("a", encoding="utf-8") as f:
                     f.write(json.dumps({
                         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "context": [{"who": w, "text": t} for w, t in turns],
-                        "relation": relation, "style": style,
-                        "candidates": req.get("candidates", []), "chosen": req.get("chosen", ""),
+                        "context": ctx, "relation": relation, "style": style, "mode": mode,
+                        "candidates": req.get("candidates", []), "chosen": chosen,
                     }, ensure_ascii=False) + "\n")
-                return self._send(200, {"ok": True})
+                # 自己写的候选才是「我的话」；AI 写的不能回流进风格语料，否则风格会越学越偏
+                added = add_style_sample(ctx, chosen) if mode == "manual" and chosen else False
+                return self._send(200, {"ok": True, "style_added": added, "style_n": len(STYLE.samples)})
 
             analysis = analyze(state)
             used_style = False
@@ -350,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
             if not candidates:
                 return self._send(400, {"error": "至少写一条候选回复"})
             ranking = rank(state, candidates, relation, style)
-            self._send(200, {"analysis": analysis, "gen_ms": gen_ms,
+            self._send(200, {"analysis": analysis, "gen_ms": gen_ms, "mode": req.get("mode") or "manual",
                              "style_used": len(STYLE.samples) if used_style else 0, **ranking})
         except Exception as e:
             self._send(500, {"error": str(e)})

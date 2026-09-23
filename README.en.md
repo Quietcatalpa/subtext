@@ -106,7 +106,9 @@ Same prompt, before and after (a friend asking whether your paper is done):
 | 哎呀正愁这事呢，你写多少了？ | 就是有点赶 |
 | 快了快了，你呢？别告诉我你也没写完 | 我想再改改 |
 
-`my_style.jsonl` and the adoption log `adopted.jsonl` are gitignored and never leave your machine. Each time you hit 复制 (copy), the choice is appended to `adopted.jsonl` — useful training data if you later fine-tune the ranker.
+`my_style.jsonl` and the adoption log `adopted.jsonl` are gitignored and never leave your machine.
+
+The corpus grows as you use it: every copy is logged to `adopted.jsonl` (training data for fine-tuning the ranker later), and in the "write my own candidates" mode the line you copy is also appended to `my_style.jsonl`, since you wrote it yourself. Drafts written by the LLM are never fed back into the style corpus — that would drift the imitation away from your real voice.
 
 ## Limitations
 

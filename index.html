@@ -103,6 +103,7 @@
   .like input { width: auto; margin: 0; accent-color: var(--accent); }
   .like span { font-size: 12px; color: var(--muted); font-weight: 400; }
   .like.off { opacity: .55; cursor: not-allowed; }
+  .added { font-size: 12px; color: var(--accent); margin-left: 10px; }
 </style>
 </head>
 <body>
@@ -157,7 +158,7 @@
       <div id="manual">
         <div id="cands"></div>
         <button class="ghost" id="add" type="button">＋ 再加一条</button>
-        <div class="hint">写几句你在犹豫的回复，Laya 帮你挑哪句最合适。</div>
+        <div class="hint">写几句你在犹豫的回复，Laya 帮你挑哪句最合适。点「复制」后，你选中的那条会自动加进语料，以后 AI 就更像你。</div>
       </div>
       <div id="gen" hidden>
         <label class="like"><input type="checkbox" id="like-me"> <b>像我说话</b> <span id="like-hint"></span></label>
@@ -309,10 +310,14 @@ function render(d) {
   document.querySelectorAll(".copy").forEach(b => b.onclick = async () => {
     try { await navigator.clipboard.writeText(b.dataset.t); b.textContent = "已复制"; b.classList.add("done"); }
     catch { b.textContent = "复制失败"; }
-    // 记下我最终采纳了哪条，攒着以后微调排序用
+    // 记下我最终采纳了哪条，攒着以后微调排序用；自己写的那条还会进风格语料
     fetch("/api/adopt", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat: $("#chat").value, relation: $("#relation").value, style: $("#style").value,
-                             candidates: d.ranked.map(r => r.text), chosen: b.dataset.t }) }).catch(() => {});
+                             mode: d.mode, candidates: d.ranked.map(r => r.text), chosen: b.dataset.t }) })
+      .then(r => r.json())
+      .then(r => { if (r.style_added) b.insertAdjacentHTML("afterend",
+        `<span class="added">已加进你的语料（${r.style_n} 条）</span>`); })
+      .catch(() => {});
   });
 }
 
