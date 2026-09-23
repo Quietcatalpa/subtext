@@ -5,3 +5,9 @@ __pycache__/
 .vscode/
 .idea/
 *.log
+
+# 个人数据：只存在本地，不上传
+my_style.jsonl
+adopted.jsonl
+聊天记录/
+screenshots/

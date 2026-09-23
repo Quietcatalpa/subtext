@@ -84,6 +84,30 @@ To use any other OpenAI-compatible endpoint (OpenRouter, Ollama, …), set `LLM_
 
 > ⚠️ When drafting is on, the recent conversation, including the other person's messages, is sent to the provider you configured.
 
+## Optional: make the drafts sound like you
+
+Show the model how you actually text, and the drafts match your voice. No training involved.
+
+1. Put your own chat screenshots in a folder, e.g. `screenshots/` (a few dozen is enough)
+2. Build the corpus — it keeps **only your own messages** plus their context:
+
+   ```bash
+   python build_corpus.py screenshots
+   ```
+
+3. Restart Subtext and tick **像我说话** ("sound like me") in the AI drafting tab
+
+Subtext summarizes your habits (message length, punctuation and emoji use, common openers) and retrieves the most similar past exchanges, then asks the model to imitate them.
+
+Same prompt, before and after (a friend asking whether your paper is done):
+
+| Off | On (169 of my real replies) |
+|---|---|
+| 哎呀正愁这事呢，你写多少了？ | 就是有点赶 |
+| 快了快了，你呢？别告诉我你也没写完 | 我想再改改 |
+
+`my_style.jsonl` and the adoption log `adopted.jsonl` are gitignored and never leave your machine. Each time you hit 复制 (copy), the choice is appended to `adopted.jsonl` — useful training data if you later fine-tune the ranker.
+
 ## Limitations
 
 - ✅ **Emotion and joke detection**: right most of the time in our tests

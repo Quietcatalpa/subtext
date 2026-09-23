@@ -98,6 +98,11 @@
   .raw summary { font-size: 13px; color: var(--muted); cursor: pointer; }
   .raw textarea { margin-top: 8px; }
   .raw a { color: var(--muted); }
+  .like { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: 14px; color: var(--ink);
+          background: var(--chip); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .like input { width: auto; margin: 0; accent-color: var(--accent); }
+  .like span { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .like.off { opacity: .55; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -155,6 +160,7 @@
         <div class="hint">写几句你在犹豫的回复，Laya 帮你挑哪句最合适。</div>
       </div>
       <div id="gen" hidden>
+        <label class="like"><input type="checkbox" id="like-me"> <b>像我说话</b> <span id="like-hint"></span></label>
         <div class="hint" id="gen-hint"></div>
       </div>
 
@@ -259,6 +265,16 @@ fetch("/api/config").then(r => r.json()).then(c => {
     ? `用 ${c.llm_model} 写 3 条候选（聊天内容会发给它），再由本地 Laya 排序。`
     : "还没配置大模型 API key，这个模式暂时用不了。配置方法见 README。";
   if (!llm) $("#tab-gen").disabled = true;
+  const box = $("#like-me");
+  if (c.style_ok) {
+    box.checked = localStorage.getItem("likeMe") !== "0";
+    $("#like-hint").textContent = `参考你的 ${c.style_n} 条真实回复 · ${c.style_profile}`;
+  } else {
+    box.disabled = true;
+    box.closest(".like").classList.add("off");
+    $("#like-hint").textContent = "还没有语料，用 build_corpus.py 从聊天截图生成 my_style.jsonl";
+  }
+  box.onchange = () => { try { localStorage.setItem("likeMe", box.checked ? "1" : "0"); } catch {} };
 });
 
 const pct = p => (p * 100).toFixed(p >= 0.995 || p < 0.1 ? 0 : 1) + "%";
@@ -281,17 +297,22 @@ function render(d) {
       <button class="copy" type="button" data-t="${esc(r.text)}">复制</button>
     </div>`).join("");
   const gen = d.gen_ms != null ? ` · 大模型写候选 ${(d.gen_ms / 1000).toFixed(1)} 秒` : "";
+  const styled = d.style_used ? ` · 模仿了你的 ${d.style_used} 条真实回复` : "";
   $("#out").innerHTML = `
     <h2>对方在想什么</h2>
     <div class="chips">${chips}</div>
     <div class="dist">情绪分布：${dist}</div>
     <h2 style="margin-top:22px">回复排序</h2>
     ${replies}
-    <div class="foot">Laya 分析 ${a.ms} ms · 排序 ${d.ms} ms（${d.method}模式）${gen} · 百分比是 Laya 认为「最合适」的概率</div>
+    <div class="foot">Laya 分析 ${a.ms} ms · 排序 ${d.ms} ms（${d.method}模式）${gen}${styled} · 百分比是 Laya 认为「最合适」的概率</div>
     <div class="foot">⚠️ 排序只作参考：实测 Laya 对回复好坏的判断不太稳，偶尔会偏爱又长又啰嗦的回复。意图和情绪分析更靠谱。</div>`;
   document.querySelectorAll(".copy").forEach(b => b.onclick = async () => {
     try { await navigator.clipboard.writeText(b.dataset.t); b.textContent = "已复制"; b.classList.add("done"); }
     catch { b.textContent = "复制失败"; }
+    // 记下我最终采纳了哪条，攒着以后微调排序用
+    fetch("/api/adopt", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat: $("#chat").value, relation: $("#relation").value, style: $("#style").value,
+                             candidates: d.ranked.map(r => r.text), chosen: b.dataset.t }) }).catch(() => {});
   });
 }
 
@@ -301,6 +322,7 @@ $("#go").onclick = async () => {
   try {
     const body = {
       chat: $("#chat").value, relation: $("#relation").value, style: $("#style").value, mode,
+      like_me: $("#like-me").checked,
       candidates: [...document.querySelectorAll("#cands input")].map(i => i.value),
     };
     const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

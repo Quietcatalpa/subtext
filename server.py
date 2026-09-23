@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import Lock
 
 import laya
+from style import Style
 
 HOST, PORT = "127.0.0.1", 7860
 MODEL = "convaiinnovations/laya-multilingual"
@@ -26,6 +27,9 @@ HERE = Path(__file__).parent
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 LLM_API_KEY = os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
+
+STYLE = Style(HERE / "my_style.jsonl")   # 我的真实回复，用来模仿口吻
+ADOPTED = HERE / "adopted.jsonl"         # 我实际采纳了哪条，攒着以后微调用
 
 # ---------- Laya 要回答的问题 ----------
 
@@ -150,14 +154,28 @@ def rank(state, candidates, relation, style):
     return {"ranked": items, "ms": round(ms, 1), "method": method}
 
 
-def generate(turns, relation, style, analysis):
+def generate(turns, relation, style, analysis, like_me=False):
     if not LLM_API_KEY:
         raise RuntimeError("没有配置大模型 API key，请用「自己写候选」模式，或按 README 配置 DEEPSEEK_API_KEY")
     convo = "\n".join("%s：%s" % (w, t) for w, t in turns)
     hint = "对方意图：%s；情绪：%s" % (analysis["intent"]["choice"], analysis["emotion"]["choice"])
-    prompt = (
-        "下面是我和对方的微信聊天记录。请以「我」的身份，写 3 条不同风格的下一句回复，"
-        "每条不超过 40 个字，口语化、像真人发的微信，不要加引号或解释。\n"
+    STYLE.reload()
+    use_style = like_me and STYLE.ok
+    if use_style:
+        # 给模型看我的说话习惯 + 几段我真实回过的话，让它照着学
+        head = (
+            "下面是我和对方的微信聊天记录。请**模仿我平时的说话方式**，以「我」的身份写 3 条不同的下一句回复。\n\n"
+            "我的说话习惯：%s。\n\n"
+            "我以前真实回过的话（照着这个语气、长度和用词写，不要照抄内容）：\n%s\n\n"
+            "硬性要求：每条不超过 %d 个字；像发微信一样随意；不要写成完整规范的句子；"
+            "不要加引号或解释。\n"
+        ) % (STYLE.profile(), STYLE.examples_text(convo), STYLE.max_len())
+    else:
+        head = (
+            "下面是我和对方的微信聊天记录。请以「我」的身份，写 3 条不同风格的下一句回复，"
+            "每条不超过 40 个字，口语化、像真人发的微信，不要加引号或解释。\n"
+        )
+    prompt = head + (
         "对方是我的：%s\n希望的风格：%s\n%s\n\n聊天记录：\n%s\n\n"
         '只输出 JSON：{"replies": ["…", "…", "…"]}'
     ) % (relation or "朋友", style or "自然", hint, convo)
@@ -178,7 +196,7 @@ def generate(turns, relation, style, analysis):
         raise RuntimeError("大模型接口报错 %d：%s" % (e.code, e.read().decode(errors="replace")[:200]))
     content = data["choices"][0]["message"]["content"]
     replies = json.loads(content).get("replies", [])
-    return [str(x).strip() for x in replies if str(x).strip()][:5]
+    return [str(x).strip() for x in replies if str(x).strip()][:5], use_style
 
 
 # ---------- 截图识别 ----------
@@ -282,7 +300,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/", "/index.html"):
             self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/config":
-            self._send(200, {"llm": bool(LLM_API_KEY), "llm_model": LLM_MODEL})
+            STYLE.reload()
+            self._send(200, {"llm": bool(LLM_API_KEY), "llm_model": LLM_MODEL,
+                             "style_n": len(STYLE.samples), "style_ok": STYLE.ok,
+                             "style_profile": STYLE.profile() if STYLE.ok else ""})
         else:
             self._send(404, {"error": "not found"})
 
@@ -303,13 +324,25 @@ class Handler(BaseHTTPRequestHandler):
             style = req.get("style", "").strip()
             state = chat_state(turns, relation)
 
-            if self.path != "/api/run":
+            if self.path not in ("/api/run", "/api/adopt"):
                 return self._send(404, {"error": "not found"})
 
+            if self.path == "/api/adopt":
+                # 记下我最终采纳了哪条：以后微调排序模型用得上
+                with ADOPTED.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "context": [{"who": w, "text": t} for w, t in turns],
+                        "relation": relation, "style": style,
+                        "candidates": req.get("candidates", []), "chosen": req.get("chosen", ""),
+                    }, ensure_ascii=False) + "\n")
+                return self._send(200, {"ok": True})
+
             analysis = analyze(state)
+            used_style = False
             if req.get("mode") == "generate":
                 t = time.perf_counter()
-                candidates = generate(turns, relation, style, analysis)
+                candidates, used_style = generate(turns, relation, style, analysis, req.get("like_me"))
                 gen_ms = round((time.perf_counter() - t) * 1000)
             else:
                 candidates = [c.strip() for c in req.get("candidates", []) if c.strip()][:8]
@@ -317,7 +350,8 @@ class Handler(BaseHTTPRequestHandler):
             if not candidates:
                 return self._send(400, {"error": "至少写一条候选回复"})
             ranking = rank(state, candidates, relation, style)
-            self._send(200, {"analysis": analysis, "gen_ms": gen_ms, **ranking})
+            self._send(200, {"analysis": analysis, "gen_ms": gen_ms,
+                             "style_used": len(STYLE.samples) if used_style else 0, **ranking})
         except Exception as e:
             self._send(500, {"error": str(e)})
 
