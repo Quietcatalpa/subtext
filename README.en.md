@@ -27,7 +27,7 @@ Subtext is a chat reply assistant that runs entirely on your own computer. Paste
 
 | Feature | What it does |
 |---|---|
-| Screenshot import | Press `Ctrl+V` on the page to paste a chat screenshot. Local OCR reads the text and tells "them" from "me" by bubble position and color |
+| Screenshot import | Press `Ctrl+V` on the page to paste a chat screenshot. Local OCR reads the text and tells "them" from "me" by bubble color. Works with phone and desktop screenshots, light and dark, and skips text inside images and stickers |
 | Intent | small talk, question, favor, invitation, request/task, venting, sharing, teasing, wrapping up |
 | Emotion | happy, calm, anxious, angry, sad, bored, with a probability distribution |
 | Joke detection | Is the other person joking? |
@@ -89,7 +89,7 @@ To use any other OpenAI-compatible endpoint (OpenRouter, Ollama, …), set `LLM_
 - ✅ **Emotion and joke detection**: right most of the time in our tests
 - ⚠️ **Intent**: mostly right, with clear misses. For example, "can you cover this meeting for me" gets labeled as an invitation (visible in the collapsed screenshots above)
 - ⚠️ **Reply ranking**: treat it as a hint. Laya is a classifier, and it sometimes prefers long, rambling replies, and rewording a candidate can flip the ranking
-- ⚠️ **OCR**: tuned for WeChat desktop bubbles. In group chats, sender nicknames may show up as a message, so delete them by hand
+- ⚠️ **OCR**: "me" is detected by WeChat's green bubble; phone and desktop screenshots both work. In group chats, sender nicknames may show up as a message, so delete them by hand
 - Laya was released in September 2026. Its behavior and API may still change
 
 Bug reports with (redacted) example screenshots are very welcome in Issues.

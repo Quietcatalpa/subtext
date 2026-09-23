@@ -196,13 +196,23 @@ def get_ocr():
 
 
 def is_green(px):
-    """微信「我」的气泡：浅色模式 #95EC69，深色模式 #3EB575 一类的绿色。"""
+    """微信「我」的气泡：浅色 #95EC69、深色 #3EB575、手机 #07C160 一类的绿色。"""
     b, g, r = (int(x) for x in px)
     return g > 120 and g - r > 35 and g - b > 35
 
 
+def is_neutral(px):
+    """灰/白：对方气泡的底色，三个通道接近。照片、表情包一般不满足。"""
+    v = [int(x) for x in px]
+    return max(v) - min(v) <= 14
+
+
 def ocr_chat(img_bytes):
-    """识别微信聊天截图：按气泡颜色和左右位置判断谁说的，同一气泡的多行合并成一条。"""
+    """识别微信聊天截图：按气泡颜色和左右位置判断谁说的，同一气泡的多行合并成一条。
+
+    电脑版和手机版都支持。手机截图（高远大于宽）还会去掉顶部状态栏/标题栏和底部输入栏；
+    气泡底色既不是绿色也不是灰白的，当作图片消息或表情包里的文字丢掉。
+    """
     import cv2
     import numpy as np
 
@@ -210,6 +220,8 @@ def ocr_chat(img_bytes):
     if img is None:
         raise RuntimeError("图片读不出来，换一张试试")
     h, w = img.shape[:2]
+    phone = h > w * 1.5
+    bg = img[int(h * 0.5), 2]  # 左边缘取页面底色
     result, _ = get_ocr()(img)
     lines = []
     for box, text, score in result or []:
@@ -219,17 +231,22 @@ def ocr_chat(img_bytes):
         xs, ys = [p[0] for p in box], [p[1] for p in box]
         x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
         cx = (x0 + x1) / 2
+        # 手机截图：顶部状态栏和标题栏、底部输入栏都不是聊天内容
+        if phone and (y1 < h * 0.09 or y0 > h * 0.94):
+            continue
         # 居中的灰字（时间、「以下是新消息」）不是聊天内容
         if TIME_RE.match(text) or (abs(cx - w / 2) < w * 0.12 and (x1 - x0) < w * 0.3 and len(text) <= 14):
             continue
-        # 取文字左侧、气泡内边距处的像素判断颜色
-        sx, sy = int(max(0, x0 - 4)), int(min(h - 1, (y0 + y1) / 2))
-        if is_green(img[sy, sx]) or is_green(img[sy, int(min(w - 1, x1 + 4))]):
-            who = "我"
-        elif x0 > w * 0.5 or (x1 > w * 0.75 and x0 > w * 0.35):
-            who = "我"
+        # 在文字四周的气泡内边距处取色
+        cy = int(min(h - 1, (y0 + y1) / 2))
+        around = [img[cy, int(max(0, x0 - 6))], img[cy, int(min(w - 1, x1 + 6))],
+                  img[int(max(0, y0 - 6)), int(cx)], img[int(min(h - 1, y1 + 6)), int(cx)]]
+        if any(is_green(p) for p in around):
+            who = "我"  # 「我」的气泡一定是绿色的
+        elif x0 < w * 0.5 and any(is_neutral(p) and abs(int(p[0]) - int(bg[0])) > 8 for p in around):
+            who = "对方"  # 左边的灰/白气泡
         else:
-            who = "对方"
+            continue  # 图片消息、表情包、截图里的文字
         lines.append({"who": who, "text": text, "y0": y0, "y1": y1, "x0": x0})
     lines.sort(key=lambda l: l["y0"])
 
