@@ -154,16 +154,28 @@ def rank(state, candidates, relation, style):
     return {"ranked": items, "ms": round(ms, 1), "method": method}
 
 
-def add_style_sample(context, reply):
-    """把我自己写并采纳的回复加进风格语料。重复的不再加一次。"""
+def add_style_sample(context, reply, src="adopted"):
+    """把我真实说过的一句话加进风格语料。重复的不再加一次。"""
     STYLE.reload()
     if any(s["reply"] == reply and [c["text"] for c in s.get("context", [])] == [c["text"] for c in context]
            for s in STYLE.samples):
         return False
     with (HERE / "my_style.jsonl").open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"context": context, "reply": reply, "src": "adopted"}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"context": context, "reply": reply, "src": src}, ensure_ascii=False) + "\n")
     STYLE.reload()
     return True
+
+
+def learn_from_chat(turns):
+    """从一段聊天记录里，把「我」说过的话连同上文收进语料。截图识别 + 人工校正后才调用。"""
+    added = 0
+    for i, (who, text) in enumerate(turns):
+        if who != "我" or not text.strip():
+            continue
+        ctx = [{"who": w, "text": t} for w, t in turns[max(0, i - 4):i]]
+        if any(c["who"] == "对方" for c in ctx):
+            added += add_style_sample(ctx, text.strip(), src="screenshot")
+    return added
 
 
 def generate(turns, relation, style, analysis, like_me=False):
@@ -353,6 +365,7 @@ class Handler(BaseHTTPRequestHandler):
                 added = add_style_sample(ctx, chosen) if mode == "manual" and chosen else False
                 return self._send(200, {"ok": True, "style_added": added, "style_n": len(STYLE.samples)})
 
+            learned = learn_from_chat(turns) if req.get("learn") else 0
             analysis = analyze(state)
             used_style = False
             if req.get("mode") == "generate":
@@ -366,6 +379,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "至少写一条候选回复"})
             ranking = rank(state, candidates, relation, style)
             self._send(200, {"analysis": analysis, "gen_ms": gen_ms, "mode": req.get("mode") or "manual",
+                             "learned": learned, "style_n": len(STYLE.samples),
                              "style_used": len(STYLE.samples) if used_style else 0, **ranking})
         except Exception as e:
             self._send(500, {"error": str(e)})

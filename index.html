@@ -177,7 +177,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let mode = "manual", llm = false;
+let mode = "manual", llm = false, fromOcr = false;  // fromOcr：聊天记录是截图识别来的，才拿去学风格
 const DEFAULTS = ["好的没问题，你安心去吧，会上的事我帮你记着", "行", "啊？我明天下午也有事诶…"];
 
 function addCand(v = "") {
@@ -215,7 +215,7 @@ $("#bubbles").onclick = e => {
   setChat(turns);
 };
 $("#chat").addEventListener("input", drawBubbles);
-$("#clear").onclick = e => { e.preventDefault(); setChat([]); };
+$("#clear").onclick = e => { e.preventDefault(); setChat([]); fromOcr = false; };
 document.querySelectorAll(".who").forEach(b => b.onclick = () => {
   const text = $("#one").value.trim(); if (!text) return $("#one").focus();
   setChat([...parseChat(), ...text.split("\n").filter(s => s.trim()).map(s => ({ who: b.dataset.who, text: s.trim() }))]);
@@ -233,6 +233,7 @@ async function ocrImage(file) {
     if (!d.turns.length) throw new Error("截图里没认出文字");
     const replace = !parseChat().length || confirm(`认出 ${d.turns.length} 条消息。\n确定 = 替换现在的聊天记录\n取消 = 接在后面`);
     setChat(replace ? d.turns : [...parseChat(), ...d.turns]);
+    fromOcr = true;
   } catch (e) {
     alert("识别失败：" + (e.message || e));
   } finally {
@@ -299,6 +300,7 @@ function render(d) {
     </div>`).join("");
   const gen = d.gen_ms != null ? ` · 大模型写候选 ${(d.gen_ms / 1000).toFixed(1)} 秒` : "";
   const styled = d.style_used ? ` · 模仿了你的 ${d.style_used} 条真实回复` : "";
+  const learned = d.learned ? `<div class="foot">📥 从这段聊天里学到你说的 ${d.learned} 句话，语料现在有 ${d.style_n} 条</div>` : "";
   $("#out").innerHTML = `
     <h2>对方在想什么</h2>
     <div class="chips">${chips}</div>
@@ -306,6 +308,7 @@ function render(d) {
     <h2 style="margin-top:22px">回复排序</h2>
     ${replies}
     <div class="foot">Laya 分析 ${a.ms} ms · 排序 ${d.ms} ms（${d.method}模式）${gen}${styled} · 百分比是 Laya 认为「最合适」的概率</div>
+    ${learned}
     <div class="foot">⚠️ 排序只作参考：实测 Laya 对回复好坏的判断不太稳，偶尔会偏爱又长又啰嗦的回复。意图和情绪分析更靠谱。</div>`;
   document.querySelectorAll(".copy").forEach(b => b.onclick = async () => {
     try { await navigator.clipboard.writeText(b.dataset.t); b.textContent = "已复制"; b.classList.add("done"); }
@@ -327,7 +330,7 @@ $("#go").onclick = async () => {
   try {
     const body = {
       chat: $("#chat").value, relation: $("#relation").value, style: $("#style").value, mode,
-      like_me: $("#like-me").checked,
+      like_me: $("#like-me").checked, learn: fromOcr,
       candidates: [...document.querySelectorAll("#cands input")].map(i => i.value),
     };
     const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

@@ -108,7 +108,7 @@ Same prompt, before and after (a friend asking whether your paper is done):
 
 `my_style.jsonl` and the adoption log `adopted.jsonl` are gitignored and never leave your machine.
 
-The corpus grows as you use it: every copy is logged to `adopted.jsonl` (training data for fine-tuning the ranker later), and in the "write my own candidates" mode the line you copy is also appended to `my_style.jsonl`, since you wrote it yourself. Drafts written by the LLM are never fed back into the style corpus — that would drift the imitation away from your real voice.
+The corpus grows as you use it. Every copy is logged to `adopted.jsonl` (training data for fine-tuning the ranker later), and `my_style.jsonl` picks up two kinds of new lines: every "me" message in a screenshot you paste (collected when you hit analyze, so you can fix mislabeled bubbles first), and, in the "write my own candidates" mode, the line you copy. Duplicates are skipped. Drafts written by the LLM are never fed back into the style corpus — that would drift the imitation away from your real voice.
 
 ## Limitations
 
